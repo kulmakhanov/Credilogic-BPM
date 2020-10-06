@@ -1,0 +1,700 @@
+application.creditlimitsccd = [:]
+application.creditlimitsuncl = [:]
+application.creditlimitsloy = [:]
+
+application.nbrkYearDifference = 1000
+application.AvgPublicServPaym6M = 0
+application.nbrkChildren = 0
+application.error = ""
+
+/*git
+ * Applicant Official Income
+ */
+if (application.applicant.employer.employmentType == "4")
+	application.applicant.officialIncomeAmount = min(85000, application.applicant.budget.officialIncome.amount)
+else 
+	application.applicant.officialIncomeAmount = application.applicant.budget.officialIncome.amount / 0.8
+
+/*
+ * Applicant GCVP Income
+ */
+if (application.applicant.pensionFundInfo?.averagePaymentOfLastSixMonths?.amount == null || application.applicant?.pensionFundInfo?.resultStatus in ["TURNED_OFF", "TIMEOUT"] || application.applicant.employer.employmentType == "4" || application.applicant.employer.occupation == "25" || application.idWOConfirm == 1 || application.idWOConfirmUcl == 1)
+	application.applicant.GCVPSalaryAmount = application.applicant.officialIncomeAmount
+else if (application.drm?.applicant?.pfParser?.parsedPayments?.findAll { it.isIndividualEntrepreneur }?.size() > application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths / 2 ||
+		application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths >= 6 || application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths == 0)
+	application.applicant.GCVPSalaryAmount = 10 * application.applicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount
+else
+	application.applicant.GCVPSalaryAmount = 10 * (application.applicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount * 6 / application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths)
+
+/*
+ * Applicant Net GCVP Income
+ */
+if (application.applicant.employer.employmentType != "4")
+	application.applicant.netGCVPSalaryAmount = 0.8 * application.applicant.GCVPSalaryAmount
+else
+	application.applicant.netGCVPSalaryAmount = application.applicant.officialIncomeAmount
+
+/*
+ * Applicant income premium in Kyzylorda
+ */
+if ((application.applicationDocuments?.count("typeCode","3006") ?: 0) > 0 && application.applicant.addresses.registrational.region == "REG_L") {
+	if (application.applicant.addresses.registrational.district in ["DIS_19", "DIS_76"])
+		application.applicant.GCVPSalaryAmount += application.applicant.netGCVPSalaryAmount * 0.5
+	else
+		application.applicant.GCVPSalaryAmount += application.applicant.netGCVPSalaryAmount * 0.3
+}
+
+/*
+ * Applicant confirmed additional income
+ */
+application.applicant.additionalConfirmedIncomeAmount = 
+		(application.applicant.budget.carRentIncome?.amount ?: 0) +
+		(application.applicant.budget.otherConfirmedIncome?.amount ?: 0) + 
+		min((application.applicant.budget.incomeFromBusiness?.amount ?: 0),application.applicant.GCVPSalaryAmount * 0.5) + 
+		(application.applicant.budget.rentIncome?.amount ?: 0)
+
+/*
+ * Applicant Additional Income
+ */
+application.applicant.additionalIncomeAmount = application.applicant.budget.additionalIncome.amount
+
+/*
+ * Spouse Income
+ */
+if (application.applicant.spouse != null && application.applicant.spouse.employer.employmentType != "0")
+	application.applicant.spouseIncomeAmount = application.applicant.spouse?.budget?.officialIncome?.amount ?: 0
+else 
+	application.applicant.spouseIncomeAmount = 0
+
+if (application.coapplicant != null){
+	/*
+	 * Coapplicant Official Income
+	 */
+	if (application.coapplicant.employer.employmentType == "4")
+		application.coapplicant.officialIncomeAmount = min(85000, application.coapplicant.budget.officialIncome.amount)
+	else 
+		application.coapplicant.officialIncomeAmount = application.coapplicant.budget.officialIncome.amount / 0.8
+		
+	/*
+	 * Coapplicant GCVP Income
+	 */
+	if (application.coapplicant.pensionFundInfo?.averagePaymentOfLastSixMonths?.amount == null || application.coapplicant.employer.employmentType == "4" || application.coapplicant.employer.occupation == "25")
+		application.coapplicant.GCVPSalaryAmount = application.coapplicant.officialIncomeAmount
+	else if (application.drm?.coapplicant?.pfParser?.parsedPayments?.findAll { it.isIndividualEntrepreneur }?.size() > application.coapplicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths / 2 ||
+			application.coapplicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths >= 6 || application.coapplicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths == 0)
+		application.coapplicant.GCVPSalaryAmount = 10 * application.coapplicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount
+	else
+		application.coapplicant.GCVPSalaryAmount = 10 * (application.coapplicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount * 6 / application.coapplicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths)
+
+	/*
+	 * Coapplicant Net GCVP Income
+	 */
+	if (application.coapplicant.employer.employmentType != "4")
+		application.coapplicant.netGCVPSalaryAmount = 0.8 * application.coapplicant.GCVPSalaryAmount
+	else
+		application.coapplicant.netGCVPSalaryAmount = application.coapplicant.officialIncomeAmount
+	
+	/*
+	 * Coapplicant income premium in Kyzylorda
+	 */
+	if ((application.applicationDocuments?.count("typeCode","3007") ?: 0) > 0 && application.coapplicant.addresses.registrational.region == "REG_L") {
+		if (application.coapplicant.addresses.registrational.district in ["DIS_19", "DIS_76"])
+			application.coapplicant.GCVPSalaryAmount += application.coapplicant.netGCVPSalaryAmount * 0.5
+		else
+			application.coapplicant.GCVPSalaryAmount += application.coapplicant.netGCVPSalaryAmount * 0.3
+	}
+	
+	/*
+	 * Coapplciant additional confirmed income
+	 */
+	application.coapplicant.additionalConfirmedIncomeAmount =
+			(application.coapplicant.budget.rentIncome?.amount ?: 0) +
+			(application.coapplicant.budget.carRentIncome?.amount ?: 0) +
+			(application.coapplicant.budget.otherConfirmedIncome?.amount ?: 0) + 
+			min((application.coapplicant.budget.incomeFromBusiness?.amount ?: 0), application.coapplicant.GCVPSalaryAmount * 0.5)
+			
+}
+
+
+if (application.idMSBCAR == 1){
+	application.DueCharges = max(application.applicant.loansInfo.previous.total.arrears.amount, application.applicant.creditBureauInfo?.totalOverdueDebt?.amount ?: 0)
+	
+def applicantCBInstallment =
+		application?.drm?.applicant?.cbParser?.monthlyInstalmentSum292Cor != null ?
+				(application?.drm?.applicant?.cbParser?.monthlyInstalmentSum292Cor) :
+				(application.applicant.creditBureauInfo?.existingContracts?.sum("monthlyInstalmentAmount") ?: 0)
+				
+application.idMSBCARCBInstallment =
+		application?.drm?.applicant?.cbParserBIN?.monthlyInstalmentSum292Cor != null ?
+				(application?.drm?.applicant?.cbParserBIN?.monthlyInstalmentSum292Cor) :
+				(application.drm?.applicant?.cbParserBIN?.existingContracts.findAll{atm ->
+				atm.monthlyInstalmentAmount != 0				
+				}.sum() ?: 0)
+				
+				
+application.applicant.budget.totalCharges = max(applicantCBInstallment, application.applicant.loansInfo.total.installment.amount, application.applicant.budget.otherMonthlyCredit.amount) + 
+		application.idMSBCARCBInstallment + (application.drm?.applicant?.cbParserBIN?.totalOverdues ?: 0) + (application.applicant?.preAccepted?.application?.sum("installment.amount") ?: 0)
+}
+else
+{
+	/*
+	 * Applicant Charges
+	 */
+application.DueCharges = max(application.applicant.loansInfo.previous.total.arrears.amount, application.applicant.creditBureauInfo?.totalOverdueDebt?.amount ?: 0)
+def applicantCBInstallment =
+		application?.drm?.applicant?.cbParser?.monthlyInstalmentSum292Cor != null ?
+				(application?.drm?.applicant?.cbParser?.monthlyInstalmentSum292Cor) :
+						(application.applicant.creditBureauInfo?.existingContracts?.sum("monthlyInstalmentAmount") ?: 0)
+				
+application.applicant.budget.totalCharges = max(applicantCBInstallment, application.applicant.loansInfo.total.installment.amount, application.applicant.budget.otherMonthlyCredit.amount) + 
+		application.DueCharges + (application.applicant?.preAccepted?.application?.sum("installment.amount") ?: 0)
+
+}
+
+
+
+/*
+ * Excluding refinancing loans charges from total charges
+ */
+if (application.idREF == 1 || application.idPreRef == 1 || application.RefAuto == 1)
+	application.applicant.budget.totalCharges = application.applicant.budget.totalCharges - application.refinancingLoansInstallment
+
+/*
+ * New logic result to data mart (INSTINCB)
+ */
+if (application.applicant.creditBureauInfo?.instinCB != null)
+	application.applicant.creditBureauInfo.instinCB = (application?.drm?.applicant?.cbParser?.monthlyInstalmentSum292Cor?.toBigDecimal() ?: 0.0)
+	
+/*
+ * Coapplicant Charges
+ */
+if (application.coapplicant != null){
+	application.coapplicantDueCharges = max(application.coapplicant.loansInfo?.previous?.total?.arrears?.amount, application.coapplicant.creditBureauInfo?.totalOverdueDebt?.amount ?: 0)
+	def coapplicantCBInstallment =
+			application?.drm?.coapplicant?.cbParser?.monthlyInstalmentSum292Cor != null ?
+				(application?.drm?.coapplicant?.cbParser?.monthlyInstalmentSum292Cor ?: 0) :
+					(application.coapplicant.creditBureauInfo?.existingContracts?.sum("monthlyInstalmentAmount") ?: 0)
+						
+application.coapplicant.budget.totalCharges = max(coapplicantCBInstallment, application.coapplicant.loansInfo.total.installment.amount, application.coapplicant.budget.otherMonthlyCredit.amount) + 
+		application.coapplicantDueCharges + (application.coapplicant?.preAccepted?.application?.sum("installment.amount") ?: 0)
+}
+
+/*
+ * Calculate for Credit Limit CCD
+ */
+
+if(application.productInfo.product.type == "CCD")
+{
+if((application?.drm.applicant?.cbParser?.maxDpd24Mths ?:0) < 60||application.applicant.employer.employmentType == "4" ||application.applicant.hasCar == 1||application.applicant.scoreValue > 600 || (application.drm?.applicant?.cbParser?.mortgageGuarantee?:0)>0 ||application.applicantGoodHistory24 == true)
+		{	
+application.creditlimitsccd.CCDscVer2GoodClient = 1
+application.creditlimitsccd.totalIncomeANKET = min(150000,(max(application.applicant.officialIncomeAmount, application.applicant.GCVPSalaryAmount) + application.applicant.additionalIncomeAmount))
+application.creditlimitsccd.totalIncomeGCVP  = min(250000,application.applicant.GCVPSalaryAmount)
+application.creditlimitsccd.totalIncomeLimit = max(application.creditlimitsccd.totalIncomeANKET,application.creditlimitsccd.totalIncomeGCVP)
+		}
+else 
+		{
+application.creditlimitsccd.CCDscVer2GoodClient = 0			
+application.creditlimitsccd.totalIncomeANKET = min(100000,(max(application.applicant.officialIncomeAmount, application.applicant.GCVPSalaryAmount) + application.applicant.additionalIncomeAmount))
+application.creditlimitsccd.totalIncomeGCVP  = min(150000,application.applicant.GCVPSalaryAmount)
+application.creditlimitsccd.totalIncomeLimit = max(application.creditlimitsccd.totalIncomeANKET,application.creditlimitsccd.totalIncomeGCVP)
+		}
+}
+
+
+/*
+ * 292 Begin
+ */
+
+
+if (application.applicant.employer.occupation == "25") {
+	application.nbrkGCVPSalaryAmount = (application?.applicant?.budget?.officialIncome?.amount ?: 0) + (application?.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+}
+else if (application.applicant.employer.employmentType == "4") {
+	application.nbrkGCVPSalaryAmount = (application?.applicant?.pensionFundInfo?.averagePaymentOfLastSixMonths?.amount ?: 0) + (application?.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+}
+else if (application.applicant?.pensionFundInfo?.resultStatus == "FINISHED") {
+	if (application.applicant.pensionFundInfo?.averagePaymentOfLastSixMonths?.amount != null) {
+		if (application.drm?.applicant?.pfParser?.parsedPayments?.findAll { it.isIndividualEntrepreneur }?.size() > application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths / 2 || application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths >= 6 || application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths == 0) {
+			application.nbrkGCVPSalaryAmount = 10 * application.applicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount + (application?.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+		}
+		else {
+			application.nbrkGCVPSalaryAmount = 10 * (application.applicant.pensionFundInfo.averagePaymentOfLastSixMonths.amount * 6 / application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths) + (application?.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+		}
+	} else {
+		application.nbrkGCVPSalaryAmount = max(0, application.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+	}
+}
+else {
+	application.nbrkGCVPSalaryAmount = max(0, application.applicant?.budget?.otherConfirmedIncome?.amount ?: 0)
+}
+
+
+if (application.nbrkGCVPSalaryAmount == 0) {
+		application.nbrkDRAL = 1
+}
+else if (application.productInfo.product.type in ["CCD", "CCP"]) {
+	application.applicant.AnnualPayment = 0.08 * (application.productInfo.creditAmount.amount) + 0.02 * (application.productInfo.creditAmount.amount)
+	application.nbrkDRAL = (application.applicant.AnnualPayment + application.applicant.budget.totalCharges) / application.nbrkGCVPSalaryAmount
+}
+else {
+	application.nbrkDRAL = (application.productInfo.calculationResult.installment + application.applicant.budget.totalCharges) / application.nbrkGCVPSalaryAmount
+}
+
+if (application.applicant?.creditBureauInfo?.terminatedContracts != null && application.applicant?.creditBureauInfo?.terminatedContracts.size() > 0) {
+	ArrayList <Integer> list = application.applicant?.creditBureauInfo?.terminatedContracts?.findAll { it.contractStatus == "1" && it.totalAmount != null }.collect { it.totalAmount.toInteger() }
+	application.MaxClosedAmount = list.max()
+}
+else {
+	application.MaxClosedAmount = 0
+}
+
+
+application.applicant.nbrkConfirmedIncomeAmount = max(application.nbrkGCVPSalaryAmount, application.applicant?.additionalConfirmedIncomeAmount?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.AbroadPaymMaxAm12M?.toInteger() ?: 0, application.wscdb?.crm?.parseCdbResult?.AbroadValueTicket12M?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.AvgOnlStoreMP6M?.toInteger() ?: 0, application.wscdb?.crm?.parseCdbResult?.CloanMaxAm3Y?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.AvgDepIn6M?.toInteger() ?: 0, application.wscdb?.crm?.parseCdbResult?.AvgDepOut6M?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.AvgDcIn6M?.toInteger() ?: 0, application.wscdb?.crm?.parseCdbResult?.AvgDcOut6M?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.DepAccAm?.toInteger() ?: 0, application.wscdb?.crm?.parseCdbResult?.MaxChDP?.toInteger() ?: 0,
+application.wscdb?.crm?.parseCdbResult?.MaxPDP?.toInteger() ?: 0)
+
+
+if (application.wscdb?.crm?.parseCdbResult?.AvgPublicServPaym6M != null) {
+	application.AvgPublicServPaym6M = application.wscdb.crm.parseCdbResult.AvgPublicServPaym6M.toInteger()
+}
+
+
+if (application.wsAESP?.crm?.AESP?.status == 1) {
+	LocalDate today = LocalDate.now()
+	int actualyear = today.getYear()
+
+	if (application.wsAESP?.crm?.parseDataResult?.AutoYear != null) {
+		try {
+        		 application.nbrkYearDifference = actualyear - Integer.parseInt(application.wsAESP.crm.parseDataResult.AutoYear.toString())
+    		}
+    		catch (NumberFormatException e) {
+         		application.error = "NumberFormatException: " + e.getMessage()
+    		}
+	}
+
+	if (application.wsAESP?.crm?.parseDataResult?.Children != null) {
+		application.nbrkChildren = application.wsAESP?.crm?.parseDataResult?.Children?.toInteger()
+	}
+}
+
+
+/*
+ * 292 End 
+ */
+
+
+application.creditlimitsuncl.additionalShareLimit = application?.refinancingLoansAmount > 0?
+	 ((application?.productInfo?.additionalAmount?.amount ?: 0 )/(application.refinancingLoansAmount)) : null
+	 
+if ((application.productInfo.product.subproduct == "PENSION_FUND" || application.productInfo.product.subproduct == "STANDARD_CASH_LOAN") && application.randomPartition.ScorecardVer.versionUNCL > 1)
+{
+	 
+	 
+	/*
+	 * additionalShareLimit += application.productInfo.additionalAmount.amount / application.refinancingLoansAmount?:0
+	 */
+	
+	application.creditlimitsuncl.totalIncomeGCVP = 0
+	application.creditlimitsuncl.totalIncomePensPKI = 0
+	application.creditlimitsuncl.totalIncomePensNoPKI = 0
+	application.creditlimitsuncl.totalIncomePKBCarGCVP = 0
+	application.creditlimitsuncl.totalIncomePKBMortgage = 0
+	application.creditlimitsuncl.totalIncomePKBPKI = 0
+	application.creditlimitsuncl.totalIncomeLimit1 = 0
+	application.creditlimitsuncl.totalIncomeLimit2 = 0
+	application.creditlimitsuncl.totalIncomeLimit3 = 0
+	application.creditlimitsuncl.totalIncomeLimit4 = 0
+	
+	/*
+	 * реф с добором или стандартый заем --- 1
+	 */
+	if ((application.idREF == 1 && application.creditlimitsuncl.additionalShareLimit > 0.1) || (application.idREF != 1 && application.applicantGoodHistory24 == false )) //&& application.randomPartition.ScorecardVer.versionCCD == 2) //application.productInfo.product.code != "UNSREF1299" || 
+	{
+		/*
+		 * лимиты если у него есть отчисления ГЦВП
+		 */
+		if (application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths > 1)
+		{
+			if (application.applicant.employer.employmentType != "4")
+			{
+				application.creditlimitsuncl.totalIncomeGCVP = 5000000
+			}
+			else
+			{
+				if (application.applicantPCH)
+				{
+					application.creditlimitsuncl.totalIncomePensPKI = 1000000
+				}
+				else
+				{
+					application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+				}
+				/*
+				 * application.creditlimitsuncl.totalIncomeLimit = 5000000
+				 */
+			}
+		}
+		/*
+		 * лимиты если у него нет отчисления ГЦВП и если повторный клиент
+		 */
+		if ((application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1 || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null)  && application.productInfo.calculationResult.outstanding < max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB )) 
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensPKI = 1000000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 400000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 700000
+			}
+			if ((application.applicantPCH || application.applicantPCH12) && application.idREF != 1 )
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 600000
+			}
+			}
+		}
+		/*
+		 * лимиты если нет ГЦВП и не повторный клиент
+		 */
+		if ((application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1 || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null ) && application.productInfo.calculationResult.outstanding > max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB ))
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 200000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 500000
+			}
+			if ((application.applicantPCH || application.applicantPCH12) && application.idREF != 1 )
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 300000
+			}
+		}
+		}
+		application.creditlimitsuncl.totalIncomeLimit1 = max(application.creditlimitsuncl.totalIncomePensNoPKI, application.creditlimitsuncl.totalIncomePensPKI, application.creditlimitsuncl.totalIncomeGCVP, application.creditlimitsuncl.totalIncomePKBPKI, application.creditlimitsuncl.totalIncomePKBMortgage, application.creditlimitsuncl.totalIncomePKBCarGCVP)
+	}
+	
+	/*
+	 * рефинанс без добора (до 10% добора допускается) --- 2
+	 */
+	if (application.creditlimitsuncl.additionalShareLimit <= 0.1 && application.idREF == 1)	
+	{
+		/*
+		 * лимиты если у него есть отчисления ГЦВП
+		 */
+		if (application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths > 1)
+		{
+			if (application.applicant.employer.employmentType != "4")
+			{
+				application.creditlimitsuncl.totalIncomeGCVP = 5000000
+			}
+			else
+			{
+				if (application.applicantPCH)
+				{
+					application.creditlimitsuncl.totalIncomePensPKI = 1000000
+				}
+				else
+				{
+					application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+				}
+				/*
+				 * application.creditlimitsuncl.totalIncomeLimit = 5000000
+				 */
+			}
+			
+		}
+		/*
+		 * лимиты если у него нет отчисления ГЦВП и если повторный клиент
+		 */
+		if ((application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1 || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null) && application.productInfo.calculationResult.outstanding < max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB )) 
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensPKI = 1000000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 600000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 1000000
+			}
+			if (application.applicantPCH)
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 700000
+			}
+			}
+		}
+		/*
+		 * лимиты если нет ГЦВП и не повторный клиент
+		 */
+		if ((application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1 || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null ) && application.productInfo.calculationResult.outstanding > max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB ))
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 400000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 700000
+			}
+			if (application.applicantPCH)
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 600000
+			}
+			}
+		}
+		application.creditlimitsuncl.totalIncomeLimit2 = max(application.creditlimitsuncl.totalIncomePensNoPKI, application.creditlimitsuncl.totalIncomePensPKI, application.creditlimitsuncl.totalIncomeGCVP, application.creditlimitsuncl.totalIncomePKBPKI, application.creditlimitsuncl.totalIncomePKBMortgage, application.creditlimitsuncl.totalIncomePKBCarGCVP)
+	}
+	
+	/*
+	 * повторный клиент --- 3
+	 */
+	if (application.applicantGoodHistory24)
+	{
+		/*
+		 * лимиты если у него есть отчисления ГЦВП
+		 */
+		if (application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths > 1)
+		{
+			if (application.applicant.employer.employmentType != "4")
+			{
+				application.creditlimitsuncl.totalIncomeGCVP = 5000000
+			}
+			else
+			{
+				if (application.applicantGoodHistory24)
+				{
+					application.creditlimitsuncl.totalIncomePensPKI = 1000000
+				}
+				else
+				{
+					application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+				}
+				
+			}
+			
+		}
+		/*
+		 * лимиты если у него нет отчисления ГЦВП и если повторный клиент
+		 */
+		if (( application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1) && application.productInfo.calculationResult.outstanding < max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB )) 
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensPKI = 1000000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 800000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 1000000
+			}
+			if (application.applicantGoodHistory24)
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 700000
+			}
+			}
+		}
+		/*
+		 * лимиты если нет ГЦВП и не повторный клиент
+		 */
+		if ((application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths <= 1 || application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null) && application.productInfo.calculationResult.outstanding > max(application.drm?.applicant?.cbParser?.maxsumofloaninnotEUB, application.drm?.applicant?.cbParser?.maxsumofloaninEUB ))
+		{
+			if (application.applicant.employer.employmentType == "4")
+			{
+				application.creditlimitsuncl.totalIncomePensNoPKI = 500000
+			}
+			else
+			{
+			if (application.applicant.hasCar > 0 || (application.drm?.applicant?.pfParser?.paymentsLastDateDiff ?: 999) <= 60)
+			{
+				application.creditlimitsuncl.totalIncomePKBCarGCVP = 600000
+			}
+			if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0)
+			{
+				application.creditlimitsuncl.totalIncomePKBMortgage = 800000
+			}
+			if (application.applicantGoodHistory24)
+			{
+				application.creditlimitsuncl.totalIncomePKBPKI = 500000
+			}
+			}
+		}
+		application.creditlimitsuncl.totalIncomeLimit3 = max(application.creditlimitsuncl.totalIncomePensNoPKI, application.creditlimitsuncl.totalIncomePensPKI, application.creditlimitsuncl.totalIncomeGCVP, application.creditlimitsuncl.totalIncomePKBPKI, application.creditlimitsuncl.totalIncomePKBMortgage, application.creditlimitsuncl.totalIncomePKBCarGCVP)
+	}
+	/*
+	 * переменная для отключения CutOff для UnCL новая скоркарта
+	 */
+	if (application.creditlimitsuncl.additionalShareLimit <= 0.1 && application.idREF == 1 && application.applicant.employer.employmentType != "4")
+	{
+		application.creditlimitsuncl.cuttOff = true
+	}
+	if (application.creditlimitsuncl.additionalShareLimit > 0.1 && application.idREF == 1 && application.applicant.employer.employmentType != "4" && application.applicantGoodHistory24)
+	{
+		application.creditlimitsuncl.cuttOff = true
+	}
+	if (application.productInfo.product.code in ["UNSSOFT12", "UNSSOFT19"] )  
+	{
+		application.creditlimitsuncl.cuttOff = false
+	}
+	else
+	{
+		if (application.applicant.pensionFundInfo?.numberOfPaymentsForLastSixMonths >= 2 && application.applicantGoodHistory24 && application.idREF != 1)
+		{
+			application.creditlimitsuncl.cuttOff = true
+		}
+	}
+
+	if (application.applicant.employer.occupation == "25")
+	{
+		application.creditlimitsuncl.totalIncomeLimit4 = 5000000
+	}
+	
+	application.creditlimitsuncl.totalIncomeLimit = max(application.creditlimitsuncl.totalIncomeLimit1, application.creditlimitsuncl.totalIncomeLimit2, application.creditlimitsuncl.totalIncomeLimit3, application.creditlimitsuncl.totalIncomeLimit4)
+}
+
+/*
+ * Лимиты по лоялти
+ */
+if ( application.productInfo.product.subproduct == "LOYALTY_LOAN" && application.applicant.greenlistCheck.Result == 1 && application.applicant?.greenlistCheckResult?.find{ it.campaign_tag == "5" } != null ) {
+
+application.creditlimitsloy.pkb = 0
+application.creditlimitsloy.loyalEUB = 0
+application.creditlimitsloy.hascar = 0
+application.creditlimitsloy.Mortgage = 0
+application.creditlimitsloy.retired = 0 
+application.creditlimitsloy.limit1 = 0
+application.creditlimitsloy.limit2	= 0
+application.creditlimitsloy.mainlimit = 0
+	
+	if(application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null || application.applicant.officialIncomeAmount > application.applicant.GCVPSalaryAmount) {
+				
+				if (application.applicant.employer.employmentType != "4"  ) {
+				
+				if ( application.applicantGoodHistory24 == true){
+					application.creditlimitsloy.pkb = min(700000,1.2*application.drm?.applicant?.cbParser?.maxsumofloaninEUB)
+				}
+				
+				if (application.drm?.applicant?.cbParser?.numTermContractsinEUB > 2 && application.drm?.applicant?.cbParser?.numTimes30Dpd60Mths == 0 ) {
+					application.creditlimitsloy.loyalEUB = min(1000000, 1.4*application.drm?.applicant?.cbParser?.maxsumofloaninEUB)
+				}
+				
+				if (application.applicant.hasCar > 0) {
+					application.creditlimitsloy.hascar = 500000
+				}
+				
+				if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0){
+				     application.creditlimitsloy.Mortgage = 700000
+				}
+			}
+			
+			else
+		  {
+		  	application.creditlimitsloy.retired = 250000
+		  }
+
+application.creditlimitsloy.limit1 = max(application.creditlimitsloy.pkb, application.creditlimitsloy.loyalEUB, application.creditlimitsloy.hascar, application.creditlimitsloy.Mortgage, application.creditlimitsloy.retired )   
+application.creditlimitsloy.Strategy = "WOConfirmation"
+}
+
+		if (application.applicant.officialIncomeAmount <= application.applicant.GCVPSalaryAmount)
+		{
+			if (application.applicant.employer.employmentType != "4"  ) {
+				if ( application.applicantGoodHistory24 == true){
+					application.creditlimitsloy.pkb = 5000000
+				}
+				
+				if (application.drm?.applicant?.cbParser?.numTermContractsinEUB > 2 && application.drm?.applicant?.cbParser?.numTimes30Dpd60Mths == 0 ) {
+					application.creditlimitsloy.loyalEUB = 5000000
+				}
+				
+				if (application.applicant.hasCar > 0) {
+					application.creditlimitsloy.hascar = 5000000
+				}
+				
+				if (application.drm?.applicant?.cbParser?.mortgageGuarantee > 0){
+				     application.creditlimitsloy.Mortgage = 5000000
+				}
+			}
+				else
+				{   application.creditlimitsloy.retired = 250000
+				}
+			
+application.creditlimitsloy.limit2 = max(application.creditlimitsloy.pkb, application.creditlimitsloy.loyalEUB, application.creditlimitsloy.hascar, application.creditlimitsloy.Mortgage, application.creditlimitsloy.retired)
+application.creditlimitsloy.Strategy = "Confirmation"
+		    
+		}
+
+application.creditlimitsloy.mainlimit = max(application.creditlimitsloy.limit1, application.creditlimitsloy.limit2)
+		
+}
+/*
+ * Calculations by mix or internal refinancing by Zhapar Asem
+ */
+if (application.idREF == 1){
+application.infoaboutref = [:]
+LinkedHashMap<String, Integer> outstandingref = [:]
+def ref = []
+def refinancing = []
+
+
+ application.refinancingLoans?.each{
+	ref.add (it.refAmount?.amount)
+}
+
+refinancing = application.applicant.creditBureauInfo.existingContracts?.findAll{ 
+ it.outstandingAmount != null }.collect { pmt ->
+for (Integer i = 0; i < ref.size(); i++){
+	if (	ref[i] == pmt.outstandingAmount)
+return [
+codeOfContract : pmt.codeOfContract,
+outstandingAmount : pmt.outstandingAmount,
+monthlyInstalmentAmount : pmt.monthlyInstalmentAmount
+]
+}
+}
+application.infoaboutref.refinancing = refinancing
+
+
+application.sumofrefinancingLoansofEub = application.infoaboutref?.refinancing?.findAll{atm ->
+(atm.codeOfContract?.startsWith("L32") ||
+atm.codeOfContract?.startsWith("L21") ||
+atm.codeOfContract?.startsWith("L10") ||
+atm.codeOfContract?.startsWith("L56") )}.collect{atm ->
+atm.outstandingAmount as Double }.sum()
+
+application.countOfRefLoans = application.infoaboutref?.refinancing?.findAll{it.codeOfContract}?.size()
+}
