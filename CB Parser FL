@@ -1,0 +1,1086 @@
+import groovy.util.slurpersupport.GPathResult
+import java.util.regex.Matcher
+
+class ParsedCbReportSmall {
+	static Integer dateDiffMonths(Date dateStart, Date dateEnd) {
+		return (dateEnd[Calendar.YEAR] * 12 + dateEnd[Calendar.MONTH]) -
+				(dateStart[Calendar.YEAR] * 12 + dateStart[Calendar.MONTH])
+	}
+
+	static Integer dateDiffIncompleteMonths(Date dateStart, Date dateEnd) {
+		if (dateEnd[Calendar.DAY_OF_MONTH] > dateStart[Calendar.DAY_OF_MONTH])
+			return (dateEnd[Calendar.YEAR] * 12 + dateEnd[Calendar.MONTH]) - (dateStart[Calendar.YEAR] * 12 + dateStart[Calendar.MONTH]) + 1
+		else
+			return (dateEnd[Calendar.YEAR] * 12 + dateEnd[Calendar.MONTH]) - (dateStart[Calendar.YEAR] * 12 + dateStart[Calendar.MONTH])
+	}
+
+	static BigDecimal cbAmountWithCurrency(
+			String amountStr,
+			def exchangeRate
+	) {
+		BigDecimal result = 0
+
+		try {
+			if (amountStr.isNumber()) {
+				result = amountStr.toBigDecimal()
+			} else {
+				amountStr = amountStr.replaceAll(",", ".").replaceAll(" ", "")
+				Matcher matcher = amountStr =~ /([\+\-]?[\d\.]+)(\w{3})/
+				if (matcher) {
+					for (match in matcher) {
+						if (match[2] == "KZT") {
+							result += match[1]?.toString()?.toBigDecimal()
+						} else {
+							def exchange = exchangeRate?.updateExchangeRateRequestItems?.find {
+								it.currencyConvertFrom == match[2]
+							}
+							BigDecimal eRate = 1
+							if (exchange?.middleRate?.toString()?.isNumber() && exchange?.middleRate?.toString()?.toBigDecimal() > 0)
+								eRate = exchange?.middleRate?.toString()?.toBigDecimal()
+							result += match[1]?.toString()?.toBigDecimal() * eRate
+						}
+					}
+				}
+			}
+			return result
+		}
+		catch (ignore) {
+		}
+		return null
+	}
+
+	static BigDecimal cbBigDecimal(String input) {
+		if (input == null) return null
+		input = input.replaceAll(",", ".").replaceAll(" ", "")
+		if (input.isNumber())
+			return input.toBigDecimal()
+		else
+			return null
+	}
+
+	static Integer cbInteger(String input) {
+		if (input == null) return null
+		input = input.replaceAll(" ", "")
+		if (input.isInteger())
+			return input.toInteger()
+		else
+			return null
+	}
+
+	static Long cbLong(String input) {
+		if (input == null) return null
+		input = input.replaceAll(" ", "")
+		if (input.isInteger())
+			return input.toLong()
+		else
+			return null
+	}
+
+	static Date cbDate(String input) {
+		if (input == null) return null
+		input = input.replaceAll("/", ".").replaceAll("-", ".")
+		try {
+			if (input.length() == 10) {
+				if (input.indexOf(".") == 2)
+					return Date.parse("dd.MM.yyyy", input)
+				else
+					return Date.parse("yyyy.MM.dd", input)
+			} else if (input.length() == 19) {
+				if (input.indexOf(".") == 2)
+					return Date.parse("dd.MM.yyyy HH:mm:ss", input)
+				else
+					return Date.parse("yyyy.MM.dd HH:mm:ss", input)
+			} else if (input.length() == 23) {
+				if (input.indexOf(".") == 2)
+					return Date.parse("dd.MM.yyyy HH:mm:ss.S", input)
+				else
+					return Date.parse("yyyy.MM.dd HH:mm:ss.S", input)
+			} else
+				return null
+		} catch (ignored) {
+			return null
+		}
+	}
+
+	static class Payment {
+		String contractGroup
+		String codeOfContract
+		Integer typeOfFounding
+		Integer financialInstitutionId
+		String financialInstitutionValue
+		Date date
+		Integer overdueDays
+		String overdueAmount
+		String TypeOfGuarantee
+		String pay
+		BigDecimal overdueAmountKzt
+	}
+
+	static ArrayList<Payment> collectPayments(GPathResult contractsList, def exchangeRate) {
+		return contractsList.collect { contract ->
+			contract.PaymentsCalendar.Year.collect { year ->
+				year.Payment.collect { payment ->
+					new Payment(
+							contractGroup: contract."..".name(),
+							codeOfContract: contract.CodeOfContract.@value.toString(),
+							typeOfFounding: cbInteger(contract.TypeOfFoundingId.@id.toString()),
+							TypeOfGuarantee: contract.Collateral.TypeOfGuarantee.@value.toString(),
+							financialInstitutionId: cbInteger(contract.FinancialInstitution.@id.toString()),
+							financialInstitutionValue: contract.FinancialInstitution.@value.toString(),
+							date: cbDate({
+								Calendar c = Calendar.getInstance()
+								c.set(year.@title.toString().toInteger(), payment.@number.toString().toInteger() - 1, 1)
+								c.set(Calendar.DAY_OF_MONTH, c.getActualMaximum(Calendar.DAY_OF_MONTH))
+								return c.format("dd.MM.yyyy")
+							}.call()),
+							overdueDays: cbInteger(payment.@value.toString()) ?: 0,
+							pay: payment.@value.toString(),
+							overdueAmount: payment.@overdue.toString(),
+							overdueAmountKzt: cbAmountWithCurrency(payment.@overdue.toString(), exchangeRate) ?: 0.0,
+					)
+				}.findAll() {
+					it.overdueAmount != ''
+				}
+			}.flatten()
+		}.flatten()
+	}
+
+	static class maxDpd {
+		String codeOfContract
+		Integer financialInstitutionId
+		Integer numberOfOverdueInstalmentsMax
+		Date numberOfOverdueInstalmentsMaxDate
+		BigDecimal numberOfOverdueInstalmentsMaxAmount
+		BigDecimal overdueAmountMax
+		Date overdueAmountMaxDate
+		Integer overdueAmountMaxCount
+		String TypeOfGuarantee
+	}
+
+	static ArrayList<maxDpd> collectMaxDpd(GPathResult contractsList, def exchangeRate) {
+		return contractsList.collect { contract ->
+			new maxDpd(
+					codeOfContract: contract.CodeOfContract.@value.toString(),
+					financialInstitutionId: cbInteger(contract.FinancialInstitution.@id.toString()),
+					numberOfOverdueInstalmentsMax: cbInteger(contract.NumberOfOverdueInstalmentsMax.@value.toString()),
+					numberOfOverdueInstalmentsMaxDate: cbDate(contract.NumberOfOverdueInstalmentsMaxDate.@value.toString()),
+					numberOfOverdueInstalmentsMaxAmount: cbAmountWithCurrency(contract.NumberOfOverdueInstalmentsMaxAmount.@value.toString(), exchangeRate),
+					overdueAmountMax: cbAmountWithCurrency(contract.OverdueAmountMax.@value.toString(), exchangeRate),
+					overdueAmountMaxDate: cbDate(contract.OverdueAmountMaxDate.@value.toString()),
+					overdueAmountMaxCount: cbInteger(contract.OverdueAmountMaxCount.@value.toString()),
+					TypeOfGuarantee: contract.Collateral.TypeOfGuarantee.@value.toString()
+			)
+		}
+	}
+
+	BigDecimal monthlyInstalmentSum
+	// Сумма ежемесячных платежей по 292 Постановлению (10% от кред. лимита по кред. картам берется при условии отсутствия суммы)
+	BigDecimal monthlyInstalmentSum292
+	// Сумма ежемесячных платежей по 292 Постановлению (как переменная выше и минус сумма последнего платежа по займам)
+	BigDecimal monthlyInstalmentSum292Cor
+	Integer numExistingContracts3Mthscnt        //Кол-во активных беззалоговых займов за 3 месяца	
+	Integer numExistingContractsEub1Mthcnt      // Кол-во активных беззалоговых займов в ЕБ за последний месяц
+	Integer hasEubContracts1Mth			    // Получал кредит в ЕБ за последний месяц
+	Integer numTerminatedContracts              // Кол-во завершенных контрактов
+	Integer numExistingContracts              // Кол-во активных контрактов
+	Integer maxDpdEverNonEub          		    // Макс. срок просрочки за все время по всем займам не-ЕБ
+	Integer maxDpdEverEub             	         // Макс. срок просрочки за все время по всем займам ЕБ
+	Integer maxDpdEver             	         // Макс. срок просрочки за все время по всем займам
+	Integer maxDpdEverExistingNonEub            // Макс. срок просрочки за все время по дейтсвующим займам не-ЕБ
+	Integer maxDpdEverExistingEub               // Макс. срок просрочки за все время по дейтсвующим займам ЕБ
+	Integer maxDpdEverTerminatedNonEub          // Макс. срок просрочки за все время по закрытым займам не-ЕБ
+	Integer maxDpdEverTerminatedEub             // Макс. срок просрочки за все время по закрытым займам ЕБ
+	Integer maxDpd12Mths				    // Макс. срок просрочки за последние 12 месяцев
+	Integer maxDpd24Mths                        // Макс. срок просрочки за последние 24 месяца
+	Integer maxDpdEub24Mths                     // Макс. срок просрочки за последние 24 месяца по займам ЕБ
+	Integer numTimes30Dpd24Mths                 // Кол-во месяцев с просрочкой 30+ дней за последние 24 месяца
+	Integer historyEub24Mths                    // Кол-во месяцев обслуживания в ЕБ за последние 24 месяца
+	Integer history24Mths				    // Кол-во месяцев обслуживания в ПКБ за последние 24 месяца
+	Integer numberOfQueries7					// Кол-во запросов в ПКБ за последние 7 дней
+	Integer numberOfQueries30			    // Кол-во запросов в ПКБ за последние 30 дней
+	Integer numberOfQueries90			    // Кол-во запросов в ПКБ за последние 90 дней
+	Integer numberOfQueries120			    // Кол-во запросов в ПКБ за последние 120 дней
+	Integer numberOfQueries180			    // Кол-во запросов в ПКБ за последние 180 дней
+	Integer numberOfQueries360			    // Кол-во запросов в ПКБ за последние 360 дней
+	Integer numTimes1Dpd24Mths                  //Кол-во месяцев с просрочкой 1+ дней за последние 24 месяца
+	Integer numTimes30DpdHist                   //Кол-во месяцев с просрочкой 30+ дней за всю историю
+	Integer numTimes1Dpd12Mths			   //Кол-во месяцев с просрочкой 1+ за последние 12 месяцев
+	BigDecimal sumOfCreditLimits				//Сумма кредитного лимита
+     Integer numberMthFromFirstAcc				//Кол-во месяцев с открытия первого кредита с ПКБ
+     Integer numberofMthFromFirstAcc              //Кол-во месяцев с открытия первого кредита с ПКБ округление в наименьшую сторону
+     BigDecimal sumofCreditOutstandingAmount	     //Использованная сумма уредитной карты
+     BigDecimal CreditUtilization				//Кредитная утилизация
+     BigDecimal CreditoverdueAmountsum            //Сумма просроченых взносов с ПКБ
+     Integer mortgageGuarantee				//Наличие залога недвижимости
+     Integer numberOfEUBcards					//Кол-во активных кредитных карт ЕБ у клиента
+     Integer numberOfAllEmptycards			  //Кол-во кредитных карт с нулевым лимитом 
+     Integer numberOfEUBEmptycards			  //Кол-во кредитных карт с нулевым лимитом В ЕБ
+     Date idDate							//Последняя дата выдачи удостоверения личности
+	Map cbPublicSources = [:]
+	String error
+	Date idccddate                     // дата выдачи евраз карты 
+	Integer numberPaymentMths     // количество платежей по ПКБ кроме кредитной карты
+	Integer numMths30Dpd24Mths      // кол-во мес на просрочке 30+ группированный
+	Integer maxsumofloaninEUB    // maks sum of loan in EUB
+	Integer maxsumofloaninnotEUB
+	Integer max1 = 0
+	Integer max2 = 0
+	Integer history48Mths   /// kol-vo obsluzhivaniya v BVU za 48 mesyacev
+	Integer history12MthsEver  // kol-vo platezhei za posl 12 mes
+	Date dateofDefaltinEub  //// дата дефолта в ераз банке
+	Date dateoflastPayment  /// дата последнего платежа
+	Date dateofDefaltlast12mths /// дата дефолта в посл 12 мес обслуживания
+	Integer numTimes30DpdSinceLastDefaultin12mths /// 30+ после дефолта в посл 12 мес
+	Integer numTimes30DpdSinceLastDefaultinEub /// 30+ после дефолта в евраз
+	Integer numofpaymentslastdefinEub   /// кол-во платежей после 90+ в евраз   
+	Integer numofpaymentslastdefin12mths /// кол-во платежей после 90+ в посл 12 мес
+	Integer numoftermcontrsincelastdefinEub  /// kol-vo zakrytyh zaimov posle 90+ v eurasian bank
+	Integer numoftermcontrsincelastdefin12m  /// kol-vo zakrytyh zaimov posle 90+ v posl 12 mes
+	Integer history12Mths  //  платежи в посл 12 мес
+	Integer numTimes30Dpd60Mths  //// кол-во 30+ в посл 60 мес в банке
+	Integer numTermContractsinEUB = 0 /// кол-во закрытых договоров в банке в посл 60 мес
+	Integer  maxDpd36MthsnonEub   /// /макс просрочка в 36 мес в БВУ
+	Integer maxDpd36MthsEub    ////// макс просрочка в 36 мес в ЕБ
+	Integer history36MthsnonEub   //// платежи в 36 мес в БВУ
+	Integer history36MthsEub   ///  платежи в 36 мес в ЕБ
+	Integer totalOutEub   //// сумма выдачи в евраз
+	Integer totalOutnotEub 
+	Integer debtAmountEub  //// сумма адолженности в евраз
+	Integer debtAmountnotEub
+	Integer numExistingContractsinEub =0  //////    kol-vo deistv zaymov in eurasian bank
+	Integer numallTerminatedContractsinEub    ///// kol-vo vseh zakr zaymov v eur banke
+	Integer numberofMFO  //// ол-во займов с МФО в посл 24 мес
+	String numberofIDcard   //// номер последней выданной уд.личн в отчете
+	BigDecimal sumOverdue10 //// Сумма просроченной задолженности более 10 дней
+
+		
+
+	ParsedCbReportSmall(String xmlString, def exchangeRate, BigDecimal minAmount, Integer minDpd, String product) {
+		try {
+			if (xmlString.length() >= 50) {
+				GPathResult root = new XmlSlurper().parseText(xmlString)
+
+				if (root.Errmessage?.size() == 0) {
+					Date dateOfReport = cbDate(root.DateTime.toString())
+					String entityType = root.Result?.Root?.Header?.@EntityType?.toString()
+					String reportCode = root.Result?.Root?.Header?.@ReportCode?.toString()
+
+					if (entityType == "Individual") {
+						if (reportCode == "Report.ReportName.Standard" || reportCode == "Report.ReportName.Advanced") {
+
+							root.Result?.Root?.PublicSources?.children()?.each {
+								cbPublicSources.put(it.name(), [
+										statusId: it.Status.@id.toString(),
+										refreshDate: cbDate(it.RefreshDate.@value.toString()),
+										actualDate: cbDate(it.ActualDate.@value.toString())
+								])
+							}
+
+							numberofMFO = 0
+							monthlyInstalmentSum = 0
+							monthlyInstalmentSum292 = 0
+							monthlyInstalmentSum292Cor = 0
+							numExistingContracts3Mthscnt = 0
+							numExistingContractsEub1Mthcnt = 0
+							sumOfCreditLimits = 0
+							sumofCreditOutstandingAmount = 0
+							numberMthFromFirstAcc = 0
+							numberMthFromFirstAcc = 0
+							CreditoverdueAmountsum = 0
+							totalOutEub = 0   //// сумма выдачи в евраз
+							totalOutnotEub = 0
+							debtAmountEub = 0 //// сумма адолженности в евраз
+							debtAmountnotEub = 0
+							sumOverdue10 = 0
+							
+							numberOfQueries7 = root.Result.Root.NumberOfQueries.DetailsQueries7days.query.@value.size()
+							numberOfQueries30 = root.Result.Root.NumberOfQueries.Days30.@value.toString().toInteger()
+							numberOfQueries90 = root.Result.Root.NumberOfQueries.Days90.@value.toString().toInteger()
+							numberOfQueries120 = root.Result.Root.NumberOfQueries.Days120.@value.toString().toInteger()
+							numberOfQueries180 = root.Result.Root.NumberOfQueries.Days180.@value.toString().toInteger()
+							numberOfQueries360 = root.Result.Root.NumberOfQueries.Days360.@value.toString().toInteger()
+							
+							mortgageGuarantee = root.Result.Root.ExistingContracts.Contract.Collateral?.TypeOfGuarantee?.@value?.findAll() {it == 'Залог недвижимости жилой/коммерческой'}.size()
+							//new CC
+							numberOfAllEmptycards = root.Result.Root.ExistingContracts.Contract.findAll {it.TypeOfFounding.@value == "Кредитная карта" && it.CreditLimit.@value == "0,00 KZT"}.size()
+							
+							numberOfEUBEmptycards = root.Result.Root.ExistingContracts.Contract.findAll {it.TypeOfFounding.@value == "Кредитная карта" && it.CreditLimit.@value == "0,00 KZT" && it.FinancialInstitution.@id == 140}.size()
+							
+							numberOfEUBcards = root.Result.Root.ExistingContracts.Contract.findAll {it.TypeOfFounding.@value == "Кредитная карта" && it.FinancialInstitution.@id == 140}.size()
+
+
+							
+							def idccdd = root.Result.Root.ExistingContracts.Contract.findAll {it.TypeOfFounding.@value == "Кредитная карта" && it.FinancialInstitution.@id == 140 && it.CreditLimit.@value != "0,00 KZT" }
+							def vyd = []
+							idccdd.each { vyd.add it.DateOfCreditStart.@value.toString()}
+							idccddate = cbDate(vyd.max())
+
+
+							
+							def dateudv = []
+							def docs = root.Result.Root.IdentificationDocuments.Document.findAll { it.Name.@value == "Удостоверение личности" && it.DateOfIssuance.@value != '-' }
+ 							def dates = []
+    							docs.each { dates.add cbDate(it.DateOfIssuance.@value.toString())}
+    							dateudv = dates
+							idDate = dateudv.max()
+
+							numberofIDcard = "00"
+							for (udv in docs){
+								if ( cbDate(udv.DateOfIssuance.@value.toString()) == idDate ){
+									numberofIDcard = udv.Number.@value.toString()
+								}
+							}
+							
+							
+							for (contract in root.Result.Root.ExistingContracts.Contract.findAll { eContract ->
+								// Более одной роли или
+								eContract.SubjectRole.size() > 1 ||
+										// Единственная роль != Залогодатель
+										eContract.SubjectRole.size() == 1 &&
+										!(eContract.SubjectRole.@value.toString() in ['Залогодатель', 'Гарант'])
+							}) {
+								String TypeOfGuarantee = contract.Collateral.TypeOfGuarantee.@value.toString()
+								Integer financialInstitutionId = cbInteger(contract.FinancialInstitution.@id.toString())
+								Date dateOfCreditEnd = cbDate(contract.DateOfCreditEnd.@value.toString())
+								Date dateOfCreditStart = cbDate(contract.DateOfCreditStart.@value.toString())
+								Integer typeOfFounding = cbInteger(contract.TypeOfFounding.@id.toString())
+								Integer periodicityOfPayments = cbInteger(contract.PeriodicityOfPayments?.@id?.toString() ?: '2')
+								BigDecimal outstandingAmount = cbAmountWithCurrency(contract.OutstandingAmount.@value.toString(), exchangeRate)
+								BigDecimal creditLimit = cbAmountWithCurrency(contract.CreditLimit.@value.toString(), exchangeRate)
+								BigDecimal totalAmount = cbAmountWithCurrency(contract.TotalAmount.@value.toString(), exchangeRate)
+								BigDecimal residualAmount = cbAmountWithCurrency(contract.ResidualAmount.@value.toString(), exchangeRate)
+								BigDecimal overdueAmount = cbAmountWithCurrency(contract.OverdueAmount.@value.toString(), exchangeRate)
+								Integer NumberOfOverdueInstalments = cbInteger(contract.NumberOfOverdueInstalments.@value.toString())
+
+							
+								Integer monthsOnBook = {
+									return dateDiffIncompleteMonths(dateOfCreditStart, dateOfReport)
+								}.call()
+								Integer monthsLeft = {
+									return dateDiffIncompleteMonths(dateOfReport, dateOfCreditEnd)
+								}.call()
+
+								Integer mindate ={ 
+									if(monthsOnBook > numberMthFromFirstAcc)
+										return monthsOnBook
+									else 
+										return numberMthFromFirstAcc
+									
+								}.call()
+
+								//////////payments as count of mths
+								Integer monthsexcard = {
+									if(typeOfFounding == 9)
+									{ 
+										 if (creditLimit == 0)
+									
+										return 0
+									else if (creditLimit != 0)
+										return dateDiffIncompleteMonths(dateOfCreditStart, dateOfReport)
+									}
+									else
+										return dateDiffIncompleteMonths(dateOfCreditStart, dateOfReport)}.call()
+
+								Integer mindatepay ={ 
+									
+									if(monthsexcard > numberPaymentMths)
+										return monthsexcard
+									else 
+										return numberPaymentMths
+										
+									
+								}.call()
+								
+
+								
+
+								BigDecimal monthlyInstalmentAmount = cbAmountWithCurrency(contract.MonthlyInstalmentAmount.@value.toString(), exchangeRate)
+								BigDecimal monthlyInstalmentAmount292 = {
+									if (periodicityOfPayments in [1, 2]) {
+										if (dateOfCreditEnd <= dateOfReport)
+											return 0
+										else {
+											if (typeOfFounding == 9) {
+												if (monthlyInstalmentAmount > 0)
+													return monthlyInstalmentAmount
+												else {
+													if (product == "CAR")
+														return 0
+													else
+														return creditLimit / 10
+												}
+											} else if (typeOfFounding == 20)
+												return Math.min(outstandingAmount, monthlyInstalmentAmount) +
+														(totalAmount - outstandingAmount) / monthsLeft
+											else if (typeOfFounding == 8)
+												return 0
+											else
+												return Math.min(outstandingAmount, monthlyInstalmentAmount)
+										}
+									} else
+										return monthlyInstalmentAmount
+								}.call()
+								BigDecimal monthlyInstalmentAmount292Cor = {
+									if (periodicityOfPayments in [1, 2] && monthsLeft <= 1)
+										return 0
+									else
+										return monthlyInstalmentAmount292
+								}.call()
+
+								Integer numExistingContracts3Mths = {
+									if(TypeOfGuarantee == "Бланковые" && monthsOnBook <=3 )
+										return 1
+									else
+										return 0
+								}.call()
+								
+								Integer numExistingContractsEub1Mth = {
+									if((TypeOfGuarantee == "Бланковые" || TypeOfGuarantee == "Другие способы обеспечения") && monthsOnBook <=1 && financialInstitutionId == 140)
+										return 1
+									else
+										return 0
+								}.call()
+
+								hasEubContracts1Mth = {
+									if(monthsOnBook <=1 && financialInstitutionId == 140)
+										return 1
+									else
+										return 0
+								}.call()
+														
+								BigDecimal CreditLimits = {
+									if (typeOfFounding == 9) {
+										if (creditLimit > 0)
+										return creditLimit
+									 else 
+									 	return 0
+									} else 
+										return 0
+								}.call()
+
+								BigDecimal CreditOutstandingAmount = {
+									if (typeOfFounding == 9) {
+										if (creditLimit > 0)
+										return residualAmount
+									 else 
+									 	return 0
+									} else 
+										return 0
+								}.call()
+
+								BigDecimal CreditoverdueAmount = {
+									if (typeOfFounding == 9) 
+										return overdueAmount
+									 else 
+									 	return 0
+								}.call()
+
+								//// max sum of loan in Eub and other banks
+								Integer eubmax = {
+									if(financialInstitutionId == 140){
+									if (typeOfFounding == 9) 	
+									return creditLimit
+									else
+									return totalAmount
+									}
+								}.call()
+								
+							
+									maxsumofloaninEUB = { 
+									if (eubmax > max1) 
+									return eubmax
+									else
+									max1
+									}.call()
+
+								Integer noneubmax = {
+									if(financialInstitutionId != 140){
+									if (typeOfFounding == 9) 	
+									return creditLimit
+									else
+									return totalAmount
+									}
+								}.call()
+								
+							
+									maxsumofloaninnotEUB = { 
+									if (noneubmax > max2) 
+									return noneubmax
+									else
+									max2
+									}.call()
+///////////////////////////////////////////////////////////////////// клиентоцентричный модель
+									BigDecimal outstandinginEub = {//////////// suuma vyda4i v EB
+									if(financialInstitutionId == 140){
+									if (typeOfFounding == 9) {
+										if(creditLimit > 0)
+										return creditLimit
+										else
+										return 0	
+									}
+									else {
+										if (totalAmount > 0)
+										return totalAmount
+										else
+										return 0
+									}}
+									else
+									return 0
+								}.call()
+
+								BigDecimal outstandingNotEub = { ////////////// summa vyda4i v BVU
+									if(financialInstitutionId != 140){
+									if (typeOfFounding == 9) {
+										if(creditLimit  > 0)
+										return creditLimit
+										else
+										return 0	
+									}
+									else {
+										if (totalAmount  > 0)
+										return totalAmount
+										else
+										return 0
+									}}
+									else
+									return 0
+								}.call()
+
+								BigDecimal debtEub = {//////////// suuma zadolzhennostu v EB
+									if(financialInstitutionId == 140){
+									if (typeOfFounding == 9) {
+										if(residualAmount  > 0)
+										return residualAmount
+										else
+										return 0	
+									}
+									else {
+										if (outstandingAmount  > 0)
+										return outstandingAmount
+										else
+										return 0
+									}}
+									else
+									return 0
+								}.call()
+								
+								BigDecimal debtnotEub = { //////////////  suuma zadolzhennostu v BVU
+									if(financialInstitutionId != 140){
+									if (typeOfFounding == 9) {
+										if(residualAmount  > 0)
+										return residualAmount
+										else
+										return 0	
+									}
+									else {
+										if (outstandingAmount  > 0)
+										return outstandingAmount
+										else
+										return 0
+									}}
+									else
+									return 0
+								}.call()
+
+
+								debtAmountEub += Math.round(debtEub*100) / 100
+								debtAmountnotEub += Math.round(debtnotEub*100)/100
+								totalOutnotEub += Math.round(outstandingNotEub*100)/100
+								totalOutEub += Math.round(outstandinginEub*100)/100 	
+								
+								monthlyInstalmentSum += Math.round(monthlyInstalmentAmount * 100) / 100
+								monthlyInstalmentSum292 += Math.round(monthlyInstalmentAmount292 * 100) / 100
+								monthlyInstalmentSum292Cor += Math.round(monthlyInstalmentAmount292Cor * 100) / 100
+								numExistingContracts3Mthscnt += numExistingContracts3Mths
+								numExistingContractsEub1Mthcnt += numExistingContractsEub1Mth
+								sumOfCreditLimits += Math.round(CreditLimits * 100) / 100
+								sumofCreditOutstandingAmount += Math.round(CreditOutstandingAmount * 100) / 100
+								numberMthFromFirstAcc = mindate
+								numberPaymentMths = mindatepay
+								max1 = maxsumofloaninEUB 
+								max2 = maxsumofloaninnotEUB
+
+
+								
+								CreditoverdueAmountsum += CreditoverdueAmount
+								if(sumOfCreditLimits > 0){
+									if(CreditoverdueAmountsum > 0 )
+										CreditUtilization = 1
+									else 
+										CreditUtilization = sumofCreditOutstandingAmount/sumOfCreditLimits								
+									}
+									else if (sumOfCreditLimits == 0){
+											if(CreditoverdueAmountsum > 0 )
+												CreditUtilization = 1
+											else 
+												CreditUtilization = 0
+											}
+
+								if (NumberOfOverdueInstalments > 10)
+									sumOverdue10 += overdueAmount									
+																		
+								}
+
+								for (contract in root.Result.Root.TerminatedContracts.Contract.findAll { eContract ->
+								// Более одной роли или
+								eContract.SubjectRole.size() > 1 ||
+										// Единственная роль != Залогодатель
+										eContract.SubjectRole.size() == 1 &&
+										!(eContract.SubjectRole.@value.toString() in ['Залогодатель', 'Гарант'])
+							}){
+								String TypeOfGuarantee = contract.Collateral.TypeOfGuarantee.@value.toString()
+								Integer financialInstitutionId = cbInteger(contract.FinancialInstitution.@id.toString())
+								Date dateOfCreditEnd = cbDate(contract.DateOfCreditEnd.@value.toString())
+								Date dateOfCreditStart = cbDate(contract.DateOfCreditStart.@value.toString())
+								Date dateOfRealRepayment = cbDate(contract.DateOfRealRepayment.@value.toString())  // дата фактического закрытия 
+								Integer typeOfFounding = cbInteger(contract.TypeOfFounding.@id.toString())
+								Integer periodicityOfPayments = cbInteger(contract.PeriodicityOfPayments?.@id?.toString() ?: '2')
+								BigDecimal outstandingAmount = cbAmountWithCurrency(contract.OutstandingAmount.@value.toString(), exchangeRate)
+								BigDecimal creditLimit = cbAmountWithCurrency(contract.CreditLimit.@value.toString(), exchangeRate)
+								BigDecimal totalAmount = cbAmountWithCurrency(contract.TotalAmount.@value.toString(), exchangeRate)
+								BigDecimal residualAmount = cbAmountWithCurrency(contract.ResidualAmount.@value.toString(), exchangeRate)
+								BigDecimal overdueAmount = cbAmountWithCurrency(contract.OverdueAmount.@value.toString(), exchangeRate)
+							
+								Integer monthsOnBook = {
+									return dateDiffIncompleteMonths(dateOfCreditStart, dateOfReport)
+								}.call()
+								Integer monthsLeft = {
+									return dateDiffIncompleteMonths(dateOfReport, dateOfCreditEnd)
+								}.call()
+
+								Integer mindateTerminated ={ 
+									if(monthsOnBook > numberMthFromFirstAcc)
+										return monthsOnBook
+									else 
+										return numberMthFromFirstAcc
+									
+								}.call()
+								
+								/////длительность  закрытого кредита (досрочно или по графику)
+								Integer monthsaction = {
+									if(typeOfFounding == 9){
+								     if (creditLimit == 0)
+								     return 0
+									else {
+												if ( dateOfRealRepayment != null )
+											return dateDiffIncompleteMonths(dateOfCreditStart, dateOfRealRepayment)
+												else
+											return dateDiffIncompleteMonths(dateOfCreditStart,dateOfCreditEnd )
+									}
+									}
+									else{
+										if (dateOfRealRepayment != null )
+									return dateDiffIncompleteMonths(dateOfCreditStart, dateOfRealRepayment)
+										else
+									return dateDiffIncompleteMonths(dateOfCreditStart,dateOfCreditEnd )	
+										}
+								}.call()/// длительность  dосрочно закрытого кредита
+								
+								Integer mindateTerminatedpay ={ 
+									if(monthsaction > numberPaymentMths)
+										return monthsaction
+									else 
+										return numberPaymentMths
+									
+								}.call()
+								////////// max sum of loan in Eub and other banks
+								Integer eubmaxt = {
+									if(financialInstitutionId == 140){
+									if (typeOfFounding == 9) 	
+									return creditLimit
+									else
+									return totalAmount
+									}
+								}.call()
+								
+							
+									maxsumofloaninEUB = { 
+									if (eubmaxt > max1) 
+									return eubmaxt
+									else
+									max1
+									}.call()
+
+								Integer noneubmaxt = {
+									if(financialInstitutionId != 140){
+									if (typeOfFounding == 9) 	
+									return creditLimit
+									else
+									return totalAmount
+									}
+								}.call()
+								
+							
+									maxsumofloaninnotEUB = { 
+									if (noneubmaxt > max2) 
+									return noneubmaxt
+									else
+									max2
+									}.call()
+
+									Integer countoftermloanineub = {
+			                                    if(financialInstitutionId == 140 && monthsLeft <= 60)
+			                                        return 1
+			                                    else
+			                                        return 0
+			                                }.call()
+								
+
+								numberMthFromFirstAcc = mindateTerminated
+								numberPaymentMths = mindateTerminatedpay  // 
+								numTermContractsinEUB += countoftermloanineub
+								max1 = maxsumofloaninEUB 
+								max2 = maxsumofloaninnotEUB 
+				
+							}
+
+							ArrayList<Payment> allPaymentsList =
+									collectPayments(
+											root.Result.Root.ExistingContracts.Contract as GPathResult,
+											exchangeRate
+									) +
+											collectPayments(
+													root.Result.Root.TerminatedContracts.Contract as GPathResult,
+													exchangeRate
+											)
+							ArrayList<Payment> allPaymentsList24Mths = allPaymentsList.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) <= 24
+							}
+
+							ArrayList<Payment> allPaymentsList12Mths = allPaymentsList.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) <= 12
+							}
+							
+							ArrayList<Payment> allPaymentsList36Mths = allPaymentsList.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) < 36
+							}
+
+
+							ArrayList<Payment> allPaymentsListinEub = allPaymentsList.findAll { it.financialInstitutionId == 140}
+							ArrayList<Payment> allPaymentsListinEub60mths = allPaymentsListinEub.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) <= 60
+							}
+
+
+							numberofMFO = allPaymentsList24Mths.findAll { (it.financialInstitutionValue.contains("МФО") || it.financialInstitutionValue.contains("МКО") ||
+							it.financialInstitutionValue.contains("ТОО") || it.financialInstitutionValue.contains("микрофин") || it.financialInstitutionValue.contains("микрокред")) &&
+							it.financialInstitutionId != 217
+							}.unique {atm ->
+							atm.codeOfContract
+							}.size()
+
+
+
+							
+							/// кол-во платежей за посл 12 мес во всех БВУ
+							history12MthsEver = allPaymentsList.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) <= 12
+							}.unique {payment ->
+								payment.date
+							}.size() 
+
+
+							numExistingContracts = root.Result.Root.ExistingContracts.Contract.size()
+							numTerminatedContracts = root.Result.Root.TerminatedContracts.Contract.size()
+
+							numExistingContractsinEub = root.Result.Root.ExistingContracts.Contract.findAll{it.FinancialInstitution.@id == 140}.size()
+							numallTerminatedContractsinEub =  root.Result.Root.TerminatedContracts.Contract.findAll{it.FinancialInstitution.@id == 140}.size()
+							
+							ArrayList<maxDpd> maxDpdListExisting =
+									collectMaxDpd(root.Result.Root.ExistingContracts.Contract as GPathResult, exchangeRate)
+							ArrayList<maxDpd> maxDpdListTerminated =
+									collectMaxDpd(root.Result.Root.TerminatedContracts.Contract as GPathResult, exchangeRate)
+
+						
+
+							/////// дата последнего платежа ***************************************************************************************************
+							dateoflastPayment = allPaymentsList.collect{ payment ->
+								payment.date as Date
+							}.max()	
+
+							//////дата посл дефолта в ЕБ
+							dateofDefaltinEub = allPaymentsListinEub.findAll {  payment ->
+	                                payment.overdueDays >= 90
+	                            }.collect { payment ->
+								payment.date as Date
+							}.max()
+
+							ArrayList<Payment> allPaymentsListlast12mths = allPaymentsList.findAll { payment ->
+                                dateDiffMonths( payment.date as Date, dateoflastPayment) <= 12 }/// платежи за посл 12 мес обслуживания
+
+                                 //////дата посл дефолта за посл 12 мес обслуживания
+	                            dateofDefaltlast12mths = allPaymentsListlast12mths.findAll {  payment ->
+	                                payment.overdueDays >= 90
+	                            }.collect { payment ->
+								payment.date as Date
+							}.max()
+
+
+
+							if (dateofDefaltinEub!= null){
+							ArrayList<Payment> allPaymentsListSinceLastDefaultinEUB = allPaymentsList.findAll { payment ->
+                                        dateDiffMonths(payment.date as Date, dateOfReport) < dateDiffMonths(dateofDefaltinEub , dateOfReport)
+                                   }           /// платежи с последнего  дефолта в ЕБ
+
+                                   numTimes30DpdSinceLastDefaultinEub = allPaymentsListSinceLastDefaultinEUB.findAll {payment ->
+                                   payment.overdueDays > 30
+                                   }.size()   /// количество месяцев а просрочке 30+ по закрытым договорам последнего дефолта in Eurasian Bank****************************
+
+                                   numofpaymentslastdefinEub = allPaymentsList.findAll { payment ->
+		                         dateDiffMonths(payment.date as Date, dateOfReport) < dateDiffMonths(dateofDefaltinEub , dateOfReport)
+		                         }.size() /// кол-во платежей мес обслуживания с момента последнего дефолта in EURASIAN BANK
+
+							numoftermcontrsincelastdefinEub = root.Result.Root.TerminatedContracts.Contract.findAll { cbDate (it.DateOfCreditEnd.@value.toString()) > dateofDefaltinEub}.size()
+							}
+
+
+							
+							if (dateofDefaltlast12mths!= null){
+                                   ArrayList<Payment> allPaymentsListSinceLastDefaultin12m = allPaymentsList.findAll { payment ->
+		                              dateDiffMonths(payment.date as Date, dateOfReport) < dateDiffMonths(dateofDefaltlast12mths , dateOfReport)
+		                         }           /// платежи с последнего  дефолта za posled 12 mesyacev obsluzhovaniya
+
+		                         numTimes30DpdSinceLastDefaultin12mths = allPaymentsListSinceLastDefaultin12m.findAll {payment ->
+		                         payment.overdueDays > 30
+		                         }.size()   /// количество месяцев а просрочке 30+ по закрытым договорам последнего дефолта in Eurasian Bank****************************
+
+	                         
+		                         numofpaymentslastdefin12mths = allPaymentsList.findAll { payment ->
+	                              dateDiffMonths(payment.date as Date, dateOfReport) < dateDiffMonths(dateofDefaltlast12mths , dateOfReport)
+	                              }.size() /// кол-во платежей мес обслуживания с момента последнего дефолта in EURASIAN BANK
+
+	                              numoftermcontrsincelastdefin12m = root.Result.Root.TerminatedContracts.Contract.findAll { cbDate (it.DateOfCreditEnd.@value.toString()) > dateofDefaltlast12mths}.size()
+							
+							}
+
+
+
+							/////// new logic for new scorecard 
+							numMths30Dpd24Mths =  allPaymentsList24Mths.findAll {  payment ->
+							payment.overdueDays >= 30
+							}.unique {payment ->
+								payment.date
+							}.size() 
+							///// for limits loyal
+							numTimes30Dpd60Mths = allPaymentsListinEub60mths.findAll {payment ->
+								payment.overdueDays >= 30
+							}.size()
+
+
+							///////// number of months since first acc math.min()
+							if (numberMthFromFirstAcc >= 1)
+							numberofMthFromFirstAcc = numberMthFromFirstAcc - 1
+							else if (numberMthFromFirstAcc == 0 )
+							numberofMthFromFirstAcc = 0
+
+
+							
+							 if (numberPaymentMths >= 1)
+							numberPaymentMths = numberPaymentMths - 1
+							else if (numberPaymentMths == 0 )
+							numberPaymentMths = 0
+
+
+							
+
+
+							maxDpdEverExistingEub = maxDpdListExisting.findAll {
+								it.financialInstitutionId == 140
+							}.collect { dpd ->
+								if (dpd.numberOfOverdueInstalmentsMax > minDpd &&
+										dpd.numberOfOverdueInstalmentsMaxAmount > minAmount) {
+									if (dpd.overdueAmountMaxCount > minDpd &&
+											dpd.overdueAmountMax > minAmount)
+										Math.max(dpd.numberOfOverdueInstalmentsMax, dpd.overdueAmountMaxCount)
+									else
+										dpd.numberOfOverdueInstalmentsMax
+								} else if (dpd.overdueAmountMaxCount > minDpd &&
+										dpd.overdueAmountMax > minAmount)
+									return dpd.overdueAmountMaxCount
+								else
+									0
+							}.max()
+
+							maxDpdEverExistingNonEub = maxDpdListExisting.findAll {
+								it.financialInstitutionId != 140
+							}.collect { dpd ->
+								if (dpd.numberOfOverdueInstalmentsMax > minDpd &&
+										dpd.numberOfOverdueInstalmentsMaxAmount > minAmount) {
+									if (dpd.overdueAmountMaxCount > minDpd &&
+											dpd.overdueAmountMax > minAmount)
+										Math.max(dpd.numberOfOverdueInstalmentsMax, dpd.overdueAmountMaxCount)
+									else
+										dpd.numberOfOverdueInstalmentsMax
+								} else if (dpd.overdueAmountMaxCount > minDpd &&
+										dpd.overdueAmountMax > minAmount)
+									return dpd.overdueAmountMaxCount
+								else
+									0
+							}.max()
+
+							maxDpdEverTerminatedEub = maxDpdListTerminated.findAll {
+								it.financialInstitutionId == 140
+							}.collect { dpd ->
+								if (dpd.numberOfOverdueInstalmentsMax > minDpd &&
+										dpd.numberOfOverdueInstalmentsMaxAmount > minAmount) {
+									if (dpd.overdueAmountMaxCount > minDpd &&
+											dpd.overdueAmountMax > minAmount)
+										Math.max(dpd.numberOfOverdueInstalmentsMax, dpd.overdueAmountMaxCount)
+									else
+										dpd.numberOfOverdueInstalmentsMax
+								} else if (dpd.overdueAmountMaxCount > minDpd &&
+										dpd.overdueAmountMax > minAmount)
+									return dpd.overdueAmountMaxCount
+								else
+									0
+							}.max()
+
+							maxDpdEverTerminatedNonEub = maxDpdListTerminated.findAll {
+								it.financialInstitutionId != 140
+							}.collect { dpd ->
+								if (dpd.numberOfOverdueInstalmentsMax > minDpd &&
+										dpd.numberOfOverdueInstalmentsMaxAmount > minAmount) {
+									if (dpd.overdueAmountMaxCount > minDpd &&
+											dpd.overdueAmountMax > minAmount)
+										Math.max(dpd.numberOfOverdueInstalmentsMax, dpd.overdueAmountMaxCount)
+									else
+										dpd.numberOfOverdueInstalmentsMax
+								} else if (dpd.overdueAmountMaxCount > minDpd &&
+										dpd.overdueAmountMax > minAmount)
+									return dpd.overdueAmountMaxCount
+								else
+									0
+							}.max()
+
+							maxDpdEverEub = Math.max(maxDpdEverExistingEub ?: 0, maxDpdEverTerminatedEub ?: 0)
+							maxDpdEverNonEub = Math.max(maxDpdEverExistingNonEub ?: 0, maxDpdEverTerminatedNonEub ?: 0)
+							maxDpdEver = Math.max(maxDpdEverEub, maxDpdEverNonEub)
+							
+							maxDpd24Mths = allPaymentsList24Mths.collect { payment ->
+								payment.overdueDays as Integer
+							}.max()
+
+							maxDpd12Mths = allPaymentsList12Mths.collect { payment ->
+								payment.overdueDays as Integer
+							}.max()
+
+							maxDpdEub24Mths = allPaymentsList24Mths.findAll {
+								it.financialInstitutionId == 140
+							}.collect { payment ->
+								payment.overdueDays as Integer
+							}.max()
+
+
+
+							//////////////////////////////////////////клиентоцентричный модель
+							maxDpd36MthsnonEub = allPaymentsList36Mths.findAll {
+								it.financialInstitutionId != 140 && it.pay != "-"
+							}.collect { payment ->
+								payment.overdueDays as Integer
+							}.max()
+
+							maxDpd36MthsEub = allPaymentsList36Mths.findAll {
+								it.financialInstitutionId == 140 && it.pay != "-"
+							}.collect { payment ->
+								payment.overdueDays as Integer
+							}.max()
+
+							history36MthsnonEub = allPaymentsList36Mths.findAll { 
+								it.financialInstitutionId != 140 && it.pay != "-"
+							}.unique {payment ->
+								payment.date
+							}.size()
+							
+							history36MthsEub = allPaymentsList36Mths.findAll {  
+								it.financialInstitutionId == 140 && it.overdueDays == 0 && it.pay != "-"
+							}.unique {payment ->
+								payment.date
+							}.size()
+							
+
+							numTimes30Dpd24Mths = allPaymentsList24Mths.findAll { payment ->
+								payment.overdueDays > 30
+							}.size()
+
+							numTimes30DpdHist = allPaymentsList.findAll { payment ->
+								payment.overdueDays > 30
+							}.size()
+
+							numTimes1Dpd24Mths = allPaymentsList24Mths.findAll { payment ->
+								payment.overdueDays >= 1
+							}.size()
+							
+							numTimes1Dpd12Mths = allPaymentsList12Mths.findAll { payment ->
+								payment.overdueDays >= 1
+							}.size()
+						
+							historyEub24Mths = allPaymentsList24Mths.findAll { 
+								it.financialInstitutionId == 140
+							}.unique {payment ->
+								payment.date
+							}.size()
+
+							history24Mths = allPaymentsList24Mths.findAll { 
+								it.financialInstitutionId != 999
+							}.unique {payment ->
+								payment.date
+							}.size()
+
+							history12Mths = allPaymentsList12Mths.findAll { 
+								it.financialInstitutionId != 999
+							}.unique {payment ->
+								payment.date
+							}.size()
+
+							///kol-vo obsluzhivaniya v BVU za posl 48 mes
+							history48Mths = allPaymentsList.findAll { payment ->
+								dateDiffMonths(payment.date as Date, dateOfReport) <= 48
+							}.unique {payment ->
+								payment.date
+							}.size()
+
+							
+
+							if (CreditUtilization == null || CreditUtilization < 0)
+							{
+								CreditUtilization = -9999
+							}
+
+
+							
+							
+						} else {
+							error = "Report type is Basic!"
+						}
+					} else {
+						error = "Report is for Organization!"
+					}
+				} else {
+					error = "Report with error: ${root.Errmessage?.toString()}"
+				}
+			} else {
+				error = "Report length is < 50!"
+			}
+		} catch (e) {
+			error = "Unhandled exception: " + e.toString()
+		}
+	}
+
+	public Map toMap() {
+		this.class.declaredFields.findAll { !it.synthetic }.collectEntries {
+			[(it.name): this."$it.name"]
+		}
+	}
+
+	String toString() {
+		return this.toMap().toString()
+	}
+}
+
+String applCbXml = application.applicant.creditBureauInfo?.result ?: ""	//XML report
+String coapplCbXml = application.coapplicant?.creditBureauInfo?.result ?: ""
+
+ParsedCbReportSmall applicantParsedCbReportSmall = new ParsedCbReportSmall (applCbXml, application.exchangeRate, 1000, 15, application.productInfo.product.type)
+ParsedCbReportSmall coapplicantParsedCbReportSmall = new ParsedCbReportSmall (coapplCbXml, application.exchangeRate, 1000, 15, application.productInfo.product.type)
+application.drm.applicant.cbParser = applicantParsedCbReportSmall.toMap()
+application.drm.coapplicant.cbParser = coapplicantParsedCbReportSmall.toMap()
