@@ -1,0 +1,102 @@
+/*
+ * Applicant PF parser 
+ */
+
+if (application.applicant.pensionFundInfo?.payments?.size() > 0){
+	application.drm.applicant.pfParser = [:]
+	LinkedHashMap<String, Integer> pfBins = [:]
+	
+	parsedPayments = application.applicant.pensionFundInfo?.payments.collect { pmt ->
+		pfBins.put(pmt.companyWhoPayedSWIFT, pfBins.get(pmt.companyWhoPayedSWIFT, 0) + 1)
+		
+		return [
+			companyWhoPayed: pmt.companyWhoPayed,
+			companyWhoPayedSWIFT: pmt.companyWhoPayedSWIFT,
+			companyWhoPayedAccount: pmt.companyWhoPayedAccount,
+			paymentDate: Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', pmt.paymentDate.toString()),
+			dateDiff: Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', application.firstSendToDecisionTstamp.toString()) - Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', pmt.paymentDate.toString()),
+			isIndividualEntrepreneur: pmt.companyWhoPayedSWIFT.substring(4, 5).toInteger() < 4,
+			isPartnerShip : pmt.companyWhoPayedSWIFT.substring(6, 7).toInteger() == 0,
+			isSelfPayment: pmt.companyWhoPayedSWIFT == application.applicant.identificationDocuments.iin,
+			isEmployerBin: pmt.companyWhoPayedSWIFT == application.applicant.employer?.bin,
+		]
+	}.sort{ a, b ->
+		a.paymentDate <=> b.paymentDate
+	}
+	application.drm.applicant.pfParser.pfBins = pfBins
+	application.drm.applicant.pfParser.paymentsDateDiff = parsedPayments.last().paymentDate - parsedPayments.first().paymentDate
+
+	if (application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == 1)
+	{
+		dateStart = application.recordedTstamp.toString()
+		dayStart = Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', dateStart)
+		application.drm.applicant.pfParser.paymentsLastDateDiff = dayStart - parsedPayments.last().paymentDate
+	}
+	else if (application.applicant?.pensionFundInfo?.numberOfPaymentsForLastSixMonths == null)
+	{
+		application.drm.applicant.pfParser.paymentsLastDateDiff = 9999
+	}
+		else
+		{
+			application.drm.applicant.pfParser.paymentsLastDateDiff = 999
+		}
+		
+	application.drm.applicant.pfParser.daysAfterLastPayment = parsedPayments.last().dateDiff
+	application.drm.applicant.pfParser.parsedPayments = parsedPayments
+	application.drm.applicant.pfParser.daysAfterFirstPayment = parsedPayments.first().dateDiff
+	application.drm.applicant.pfParser.countofCompanyWhoPayed = application.drm?.applicant?.pfParser?.parsedPayments.findAll{ pmt ->
+	pmt.companyWhoPayedSWIFT!= null 
+	}.unique{ pmt ->
+	pmt.companyWhoPayedSWIFT
+	}.size()
+
+	application.applicant.lastbin =  parsedPayments.last().companyWhoPayedSWIFT
+}
+
+/*
+ * Coapplicant PF parser
+ */
+if (application.coapplicant != null) {
+	if (application.coapplicant.pensionFundInfo?.payments?.size() > 0) {
+		application.drm.coapplicant.pfParser = [:]
+		LinkedHashMap<String, Integer> coapplicantPfBins = [:]
+		
+		coapplicantParsedPayments = application.coapplicant.pensionFundInfo?.payments.collect { pmt ->
+			coapplicantPfBins.put(pmt.companyWhoPayedSWIFT, coapplicantPfBins.get(pmt.companyWhoPayedSWIFT, 0) + 1)
+			
+			return [
+				companyWhoPayed: pmt.companyWhoPayed,
+				companyWhoPayedSWIFT: pmt.companyWhoPayedSWIFT,
+				companyWhoPayedAccount: pmt.companyWhoPayedAccount,
+				paymentDate: Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', pmt.paymentDate.toString()),
+				dateDiff: Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', application.firstSendToDecisionTstamp.toString()) - Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', pmt.paymentDate.toString()),
+				isIndividualEntrepreneur: pmt.companyWhoPayedSWIFT.substring(4, 5).toInteger() < 4,
+				isSelfPayment: pmt.companyWhoPayedSWIFT == application.coapplicant.identificationDocuments.iin,
+				isEmployerBin: pmt.companyWhoPayedSWIFT == application.coapplicant.employer?.bin,
+			]
+		}.sort{ a, b ->
+			a.paymentDate <=> b.paymentDate
+		}
+	application.drm.coapplicant.pfParser.pfBins = coapplicantPfBins
+	application.drm.coapplicant.pfParser.paymentsDateDiff = coapplicantParsedPayments.last().paymentDate - coapplicantParsedPayments.first().paymentDate
+	application.drm.coapplicant.pfParser.daysAfterLastPayment = coapplicantParsedPayments.last().dateDiff
+	application.drm.coapplicant.pfParser.parsedPayments = coapplicantParsedPayments
+	}
+}
+
+
+HashSet <String> BinsHashSet = new HashSet <String> ()
+if (application.applicant.pensionFundInfo?.payments?.size() > 0) {
+	for (int i = 0; i < application.applicant.pensionFundInfo?.payments?.size(); i++) {
+	    if (Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', application.firstSendToDecisionTstamp.toString()) - Date.parse('yyyy-MM-dd\'T\'HH:mm:ss', application.applicant.pensionFundInfo.payments[i].paymentDate.toString()) <= 60) {
+			BinsHashSet.add(application.applicant.pensionFundInfo.payments[i].companyWhoPayedSWIFT)
+		}
+	}
+}
+
+application.BinsHashSet = []
+application.BinsHashSet = BinsHashSet
+
+
+
+
